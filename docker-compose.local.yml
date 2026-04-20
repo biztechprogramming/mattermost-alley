@@ -1,0 +1,76 @@
+# Local rehearsal compose — no Caddy, no TLS, no public domain.
+# Mattermost is exposed on :8065 (all interfaces) so phones on the same wifi
+# can connect. Set LAN_IP in .env to your machine's LAN address if you want
+# the mobile app to work correctly — SiteURL must match what the phone types.
+# Volumes are prefixed *-local-* so they don't collide with production state
+# if you later run the production compose on the same machine.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up -d
+#   open http://localhost:8065
+#   (phone) http://$LAN_IP:8065
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mattermost
+      POSTGRES_PASSWORD: local-dev-password
+      POSTGRES_DB: mattermost
+    volumes:
+      - postgres-local-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mattermost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mattermost:
+    build:
+      context: .
+      dockerfile: Dockerfile.branded
+      args:
+        SITE_NAME: ${SITE_NAME:-Rally}
+    image: mattermost-relay-branded:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8065:8065"
+    environment:
+      TZ: UTC
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: postgres://mattermost:local-dev-password@postgres:5432/mattermost?sslmode=disable&connect_timeout=10
+      # If LAN_IP is set, SiteURL points at the LAN address so phones work.
+      # If unset, falls back to localhost (browser on this box only).
+      MM_SERVICESETTINGS_SITEURL: http://${LAN_IP:-localhost}:8065
+      MM_TEAMSETTINGS_SITENAME: ${SITE_NAME:-Rally}
+      MM_FILESETTINGS_MAXFILESIZE: "52428800"
+    volumes:
+      - mattermost-local-config:/mattermost/config
+      - mattermost-local-data:/mattermost/data
+      - mattermost-local-logs:/mattermost/logs
+      - mattermost-local-plugins:/mattermost/plugins
+      - mattermost-local-client-plugins:/mattermost/client/plugins
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8065/api/v4/system/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres-local-data:
+  mattermost-local-config:
+  mattermost-local-data:
+  mattermost-local-logs:
+  mattermost-local-plugins:
+  mattermost-local-client-plugins:
+
+networks:
+  internal:

@@ -1,0 +1,55 @@
+# Branded Mattermost image.
+#
+# The upstream mattermost/mattermost-team-edition image is distroless — no
+# /bin/sh — so RUN won't work on top of it directly. Instead we assemble all
+# the overrides in an alpine "builder" stage that mirrors the final filesystem
+# layout under /overlay/, then COPY the entire overlay into the final image
+# in one shot. COPY doesn't need a shell.
+#
+# This rewrites user-visible "Mattermost" strings to $SITE_NAME across the
+# i18n translation files and the main HTML shell, and optionally overlays
+# custom favicon / app-icon assets from ./branding/ if present.
+#
+# JS bundles are deliberately left alone — variable names and class
+# identifiers contain "Mattermost" and would break if blanket-replaced.
+# Translation files + the MM_TEAMSETTINGS_SITENAME config var cover nearly
+# every user-visible surface.
+
+ARG MATTERMOST_VERSION=latest
+
+# Pin the source image under a named stage so the builder can COPY --from
+# it without re-specifying the tag.
+FROM mattermost/mattermost-team-edition:${MATTERMOST_VERSION} AS source
+
+# Builder stage: alpine has a shell, so sed + conditional file shuffling works.
+FROM alpine:latest AS builder
+ARG SITE_NAME=Mattermost
+
+# i18n translations — pull from source, rewrite in place.
+COPY --from=source /mattermost/i18n /overlay/mattermost/i18n
+RUN find /overlay/mattermost/i18n -name '*.json' \
+    -exec sed -i "s/Mattermost/${SITE_NAME}/g" {} +
+
+# HTML shell page title. Tolerate the file being missing or renamed in
+# future versions.
+COPY --from=source /mattermost/client/root.html /overlay/mattermost/client/root.html
+RUN sed -i "s|<title>[^<]*</title>|<title>${SITE_NAME}</title>|" \
+    /overlay/mattermost/client/root.html || true
+
+# Branding asset overlay. Copy whatever the user supplied in ./branding/ and
+# drop matching files into the overlay's client dir. Missing files are
+# skipped silently — only files the user provides get overlaid.
+COPY branding/ /tmp/branding/
+RUN set -eu; \
+    cd /tmp/branding; \
+    for f in favicon.ico icon_96x96.png icon_76x76.png icon_72x72.png \
+             icon_60x60.png icon_57x57.png icon_40x40.png \
+             favicon-16x16.png favicon-32x32.png \
+             apple-touch-icon-120x120.png apple-touch-icon-152x152.png; do \
+      if [ -f "$f" ]; then cp "$f" "/overlay/mattermost/client/$f"; fi; \
+    done
+
+# Final stage: layer the overlay on top of the stock Mattermost image.
+# Only COPY is used here because the base is distroless.
+FROM source
+COPY --from=builder /overlay /
