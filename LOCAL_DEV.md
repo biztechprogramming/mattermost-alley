@@ -26,10 +26,18 @@ skips creation. Override defaults with env vars:
 ADMIN_PASSWORD='stronger' TEAM_NAME=testing ./scripts/setup-local.sh
 ```
 
-Build from your local mattermost source tree (at `../mattermost`):
+Build from your local mattermost source tree (auto-detected when
+`../mattermost` exists, or force it explicitly):
 
 ```bash
-BUILD_FROM_SOURCE=1 ./scripts/setup-local.sh
+# Auto-detected — just run the script if ../mattermost exists:
+./scripts/setup-local.sh
+
+# Explicit, or point at a different checkout:
+BUILD_FROM_SOURCE=1 MATTERMOST_SOURCE=/path/to/mattermost ./scripts/setup-local.sh
+
+# Force upstream image even when local source is present:
+BUILD_FROM_SOURCE=0 ./scripts/setup-local.sh
 ```
 
 Wipe volumes and start over:

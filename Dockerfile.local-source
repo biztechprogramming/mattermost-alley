@@ -17,10 +17,11 @@
 FROM node:24-bookworm AS webapp-builder
 
 WORKDIR /src/webapp
-COPY mattermost/webapp/package.json mattermost/webapp/package-lock.json ./
-RUN npm ci --ignore-scripts
+# Copy full webapp tree (npm workspaces require all packages present for install)
 COPY mattermost/webapp/ ./
-RUN npx mmake dist
+RUN npm ci
+# Build the channels webapp (production webpack bundle)
+RUN cd channels && npm run build
 
 # ---------------------------------------------------------------------------
 # Stage 2: build the server
@@ -81,7 +82,7 @@ RUN sed -i "s|<title>[^<]*</title>|<title>${SITE_NAME}</title>|" \
     /mattermost/client/root.html || true
 
 # Branding asset overlay
-COPY branding/ /tmp/branding/
+COPY mattermost-relay/branding/ /tmp/branding/
 RUN set -eu; \
     cd /tmp/branding; \
     for f in favicon.ico icon_96x96.png icon_76x76.png icon_72x72.png \

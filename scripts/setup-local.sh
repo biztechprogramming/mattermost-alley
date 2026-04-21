@@ -12,7 +12,9 @@
 #   TEAM_NAME=relay
 #   TEAM_DISPLAY="Relay"
 #   MM_URL=http://localhost:8065
-#   BUILD_FROM_SOURCE=1  — build from local ../mattermost source tree
+#   BUILD_FROM_SOURCE=1  — build from local mattermost source tree (auto-detected)
+#   BUILD_FROM_SOURCE=0  — force upstream image even when source is present
+#   MATTERMOST_SOURCE=../mattermost  — path to local mattermost checkout
 
 set -euo pipefail
 
@@ -23,9 +25,21 @@ TEAM_NAME=${TEAM_NAME:-relay}
 TEAM_DISPLAY=${TEAM_DISPLAY:-Relay}
 MM_URL=${MM_URL:-http://localhost:8065}
 
-BUILD_FROM_SOURCE=${BUILD_FROM_SOURCE:-0}
+MATTERMOST_SOURCE=${MATTERMOST_SOURCE:-../mattermost}
+
+# Auto-detect: build from source when the local checkout exists, unless
+# explicitly overridden with BUILD_FROM_SOURCE=0.
+if [[ -z "${BUILD_FROM_SOURCE:-}" ]]; then
+  if [[ -d "$MATTERMOST_SOURCE/server" && -d "$MATTERMOST_SOURCE/webapp" ]]; then
+    BUILD_FROM_SOURCE=1
+  else
+    BUILD_FROM_SOURCE=0
+  fi
+fi
+
 COMPOSE_FILES=(-f docker-compose.local.yml)
 if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
+  [[ -d "$MATTERMOST_SOURCE/server" ]] || die "MATTERMOST_SOURCE=$MATTERMOST_SOURCE not found (need server/ and webapp/ dirs)"
   COMPOSE_FILES+=(-f docker-compose.local-source.yml)
 fi
 
@@ -63,7 +77,11 @@ if [[ "$RESET" -eq 1 ]]; then
   compose down -v
 fi
 
-log "Building branded image + starting postgres + mattermost"
+if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
+  log "Building from local source ($MATTERMOST_SOURCE) + starting postgres + mattermost"
+else
+  log "Using upstream image + starting postgres + mattermost"
+fi
 compose up -d --build
 
 log "Waiting for Mattermost API at $MM_URL (up to 2 min)"
