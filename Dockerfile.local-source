@@ -1,24 +1,28 @@
 # Build Mattermost from a local source tree, then apply branding.
 #
+# Build context should be the parent of both repos (e.g. /workspace).
+# MATTERMOST_SOURCE build arg controls the path to the mattermost checkout
+# relative to the build context (default: "mattermost").
+#
 # Usage (via docker-compose.local-source.yml or directly):
 #   docker build -f Dockerfile.local-source \
-#     --build-arg MATTERMOST_SOURCE=../mattermost \
-#     --build-arg SITE_NAME=Rally .
+#     --build-arg MATTERMOST_SOURCE=mattermost \
+#     --build-arg SITE_NAME=Rally ..
 #
-# The local mattermost repo must be passed as build context or via
-# MATTERMOST_SOURCE arg. The Dockerfile compiles server + webapp inside
-# a multi-stage build, assembles the same /mattermost layout the upstream
-# image uses, then layers branding on top — identical to Dockerfile.branded
-# but from source instead of a published image.
+# The Dockerfile compiles server + webapp inside a multi-stage build,
+# assembles the same /mattermost layout the upstream image uses, then layers
+# branding on top — identical to Dockerfile.branded but from source instead
+# of a published image.
 
 # ---------------------------------------------------------------------------
 # Stage 1: build the webapp
 # ---------------------------------------------------------------------------
 FROM node:24-bookworm AS webapp-builder
+ARG MATTERMOST_SOURCE=mattermost
 
 WORKDIR /src/webapp
 # Copy full webapp tree (npm workspaces require all packages present for install)
-COPY mattermost/webapp/ ./
+COPY ${MATTERMOST_SOURCE}/webapp/ ./
 RUN npm ci
 # Build the channels webapp (production webpack bundle)
 RUN cd channels && npm run build
@@ -27,12 +31,13 @@ RUN cd channels && npm run build
 # Stage 2: build the server
 # ---------------------------------------------------------------------------
 FROM golang:1.25-bookworm AS server-builder
+ARG MATTERMOST_SOURCE=mattermost
 
 # Install make
 RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src/server
-COPY mattermost/server/ ./
+COPY ${MATTERMOST_SOURCE}/server/ ./
 
 # Setup go workspace (team edition only)
 RUN go work init && go work use . && go work use ./public
@@ -47,6 +52,7 @@ RUN env GOOS=linux GOARCH=amd64 go build -o /out/mmctl \
 # Stage 3: assemble the mattermost dist layout
 # ---------------------------------------------------------------------------
 FROM ubuntu:noble AS assembler
+ARG MATTERMOST_SOURCE=mattermost
 ARG SITE_NAME=Mattermost
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -59,10 +65,10 @@ COPY --from=server-builder /out/mattermost /mattermost/bin/mattermost
 COPY --from=server-builder /out/mmctl      /mattermost/bin/mmctl
 
 # Server resources
-COPY mattermost/server/config/README.md /mattermost/config/README.md
-COPY mattermost/server/fonts/            /mattermost/fonts/
-COPY mattermost/server/templates/        /mattermost/templates/
-COPY mattermost/server/i18n/             /mattermost/i18n/
+COPY ${MATTERMOST_SOURCE}/server/config/README.md /mattermost/config/README.md
+COPY ${MATTERMOST_SOURCE}/server/fonts/            /mattermost/fonts/
+COPY ${MATTERMOST_SOURCE}/server/templates/        /mattermost/templates/
+COPY ${MATTERMOST_SOURCE}/server/i18n/             /mattermost/i18n/
 
 # Webapp client bundle
 COPY --from=webapp-builder /src/webapp/channels/dist/ /mattermost/client/

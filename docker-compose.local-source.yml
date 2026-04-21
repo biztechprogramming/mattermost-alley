@@ -6,7 +6,8 @@
 # Or manually:
 #   docker compose -f docker-compose.local.yml -f docker-compose.local-source.yml up -d --build
 #
-# Requires the mattermost source repo at ../mattermost (sibling directory).
+# Requires the mattermost source repo as a sibling (../mattermost by default).
+# Override with MATTERMOST_SOURCE env var for non-standard layouts.
 
 services:
   mattermost:
@@ -15,4 +16,5 @@ services:
       dockerfile: mattermost-relay/Dockerfile.local-source
       args:
         SITE_NAME: ${SITE_NAME:-Rally}
+        MATTERMOST_SOURCE: ${MATTERMOST_SOURCE:-mattermost}
     image: mattermost-relay-local-source:latest
