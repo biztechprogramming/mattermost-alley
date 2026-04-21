@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Alley Branding Mockup</title>
+  <style>
+    :root {
+      --bg: #0b1118;
+      --panel: rgba(9, 14, 20, 0.72);
+      --panel-border: rgba(255,255,255,0.08);
+      --text: #f5f7fa;
+      --muted: rgba(245,247,250,0.72);
+      --accent: #d79a52;
+      --accent-2: #ffbf7a;
+      --shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        linear-gradient(rgba(6, 10, 15, 0.48), rgba(6, 10, 15, 0.68)),
+        url('/data/images/the-alley-background-sample.png') center/cover no-repeat fixed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .frame {
+      width: min(1280px, 100%);
+      min-height: 760px;
+      border-radius: 28px;
+      overflow: hidden;
+      position: relative;
+      box-shadow: var(--shadow);
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(8px);
+    }
+
+    .topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 74px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: linear-gradient(to bottom, rgba(5,8,12,0.72), rgba(5,8,12,0.18));
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      z-index: 2;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+
+    .brand small {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.14em;
+    }
+
+    .nav {
+      display: flex;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .nav span {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      min-height: 760px;
+    }
+
+    .hero {
+      padding: 140px 56px 56px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      position: relative;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(6,10,15,0.52) 0%, rgba(6,10,15,0.18) 45%, rgba(6,10,15,0.02) 100%);
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      position: relative;
+      max-width: 620px;
+    }
+
+    .eyebrow {
+      color: var(--accent-2);
+      text-transform: uppercase;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      font-weight: 700;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(42px, 6vw, 68px);
+      line-height: 0.96;
+      letter-spacing: -0.04em;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.6;
+      max-width: 56ch;
+    }
+
+    .panel-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 110px 40px 40px;
+      position: relative;
+    }
+
+    .login-panel {
+      width: min(420px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 24px;
+      padding: 28px;
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow);
+    }
+
+    .login-panel h2 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .login-panel p {
+      margin: 0 0 24px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      flex: 1;
+      border: 0;
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: default;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), #b56a2e);
+      color: #16110c;
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 980px) {
+      .content { grid-template-columns: 1fr; }
+      .hero { min-height: 420px; justify-content: end; }
+      .panel-wrap { padding-top: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="topbar">
+      <div class="brand">
+        <img src="/data/images/the-alley-icon-lantern-chat.png" alt="The Alley icon" />
+        <div>
+          <small>COMMUNITY EDITION</small>
+          The Alley
+        </div>
+      </div>
+      <div class="nav">
+        <span>Town Square</span>
+        <span>Projects</span>
+        <span>Members</span>
+      </div>
+    </div>
+
+    <div class="content">
+      <section class="hero">
+        <div class="hero-inner">
+          <div class="eyebrow">Branding mockup</div>
+          <h1>A warmer, more cinematic front door for The Alley.</h1>
+          <p>
+            This shows how the generated background image can support the brand without fighting the UI:
+            dark atmosphere, warm amber accents, and a clean sign-in panel layered over the artwork.
+          </p>
+        </div>
+      </section>
+
+      <section class="panel-wrap">
+        <div class="login-panel">
+          <h2>Welcome back</h2>
+          <p>Sign in to join your channels, direct messages, and project spaces.</p>
+
+          <div class="field">
+            <label>Email</label>
+            <input value="you@example.com" />
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input value="••••••••••••" />
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-primary">Sign in</button>
+            <button class="btn btn-secondary">Create account</button>
+          </div>
+
+          <div class="footer-note">
+            Mockup only — intended to preview a branded login or landing surface.
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
