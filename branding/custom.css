@@ -1,0 +1,102 @@
+/* The Alley - Custom Login Page Branding
+ * Dark cinematic aesthetic with warm amber/gold accents.
+ */
+
+/* Dark atmospheric background for the login page */
+.login-body,
+.signup-body {
+    background: linear-gradient(
+        135deg,
+        #0b1118 0%,
+        #131b26 30%,
+        #1a1510 60%,
+        #0d0f14 100%
+    ) !important;
+    background-attachment: fixed !important;
+}
+
+/* Subtle pattern overlay via pseudo-element */
+.login-body::before,
+.signup-body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: url("/static/background.svg");
+    opacity: 0.12;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Login card - frosted glass effect */
+.login-body .login-body-card,
+.login-body .signup-body-card,
+.login-body .AuthPage,
+.signup-body .signup-body-card {
+    background: rgba(15, 20, 30, 0.75) !important;
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    border: 1px solid rgba(215, 154, 82, 0.15) !important;
+    border-radius: 12px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5),
+                0 0 80px rgba(215, 154, 82, 0.04) !important;
+}
+
+/* Login page title / header - amber accent */
+.login-body .login-body-card-title,
+.login-body .login-body-card h1,
+.login-body h1,
+.signup-body h1 {
+    color: #d79a52 !important;
+}
+
+/* Subtitle / description text */
+.login-body .login-body-card-subtitle,
+.login-body .login-body-message-subtitle {
+    color: rgba(255, 191, 122, 0.7) !important;
+}
+
+/* Primary button - amber tones */
+.login-body .btn-primary,
+.signup-body .btn-primary {
+    background: linear-gradient(135deg, #d79a52, #c0863f) !important;
+    border-color: #d79a52 !important;
+    color: #0b1118 !important;
+    font-weight: 600 !important;
+}
+
+.login-body .btn-primary:hover,
+.signup-body .btn-primary:hover {
+    background: linear-gradient(135deg, #e0a85e, #d79a52) !important;
+    border-color: #e0a85e !important;
+}
+
+/* Input fields */
+.login-body .form-control,
+.signup-body .form-control {
+    background: rgba(11, 17, 24, 0.6) !important;
+    border-color: rgba(215, 154, 82, 0.25) !important;
+    color: #e0d6c8 !important;
+}
+
+.login-body .form-control:focus,
+.signup-body .form-control:focus {
+    border-color: #d79a52 !important;
+    box-shadow: 0 0 0 2px rgba(215, 154, 82, 0.2) !important;
+}
+
+/* Links */
+.login-body a,
+.signup-body a {
+    color: #ffbf7a !important;
+}
+
+.login-body a:hover,
+.signup-body a:hover {
+    color: #ffe0b8 !important;
+}
+
+/* Site name / brand text at the top */
+.login-body .hfroute-header,
+.login-body .header-logo-link {
+    color: #d79a52 !important;
+}

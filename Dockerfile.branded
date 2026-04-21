@@ -36,6 +36,10 @@ COPY --from=source /mattermost/client/root.html /overlay/mattermost/client/root.
 RUN sed -i "s|<title>[^<]*</title>|<title>${SITE_NAME}</title>|" \
     /overlay/mattermost/client/root.html || true
 
+# Inject custom CSS link into root.html before </head>
+RUN sed -i 's|</head>|<link rel="stylesheet" href="/static/custom.css"></head>|' \
+    /overlay/mattermost/client/root.html || true
+
 # Branding asset overlay. Copy whatever the user supplied in ./branding/ and
 # drop matching files into the overlay's client dir. Missing files are
 # skipped silently — only files the user provides get overlaid.
@@ -46,6 +50,9 @@ RUN set -eu; \
              icon_60x60.png icon_57x57.png icon_40x40.png \
              favicon-16x16.png favicon-32x32.png \
              apple-touch-icon-120x120.png apple-touch-icon-152x152.png; do \
+      if [ -f "$f" ]; then cp "$f" "/overlay/mattermost/client/$f"; fi; \
+    done; \
+    for f in custom.css background.svg; do \
       if [ -f "$f" ]; then cp "$f" "/overlay/mattermost/client/$f"; fi; \
     done
 

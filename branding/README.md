@@ -8,6 +8,9 @@ only need to provide the ones you want to override.
 The string rename (`Mattermost` → whatever `SITE_NAME` is set to in `.env`)
 happens separately inside the Dockerfile and doesn't need any files here.
 
+**`SITE_NAME` should be set to `The Alley` in your `.env` file** (see
+`.env.example`).
+
 ## Files that get overlaid (all optional)
 
 | File | Where it ends up | Notes |
@@ -23,6 +26,38 @@ happens separately inside the Dockerfile and doesn't need any files here.
 | `icon_40x40.png` | same dir | iOS Spotlight. |
 | `apple-touch-icon-120x120.png` | same dir | iPhone home-screen. |
 | `apple-touch-icon-152x152.png` | same dir | iPad home-screen. |
+| `custom.css` | `/mattermost/client/custom.css` | Custom CSS for login page branding (dark/amber theme). |
+| `background.svg` | `/mattermost/client/background.svg` | Tileable dark geometric pattern used by `custom.css`. |
+
+## Custom CSS injection
+
+`Dockerfile.branded` injects a `<link rel="stylesheet" href="/static/custom.css">`
+tag into `root.html` (before `</head>`) during the builder stage using `sed`.
+Static files placed in `/mattermost/client/` are served by Mattermost at the
+`/static/` URL path, so the CSS and background SVG are available at
+`/static/custom.css` and `/static/background.svg` respectively.
+
+The `custom.css` file styles the login page with:
+- A dark atmospheric background using CSS gradients
+- A subtle SVG pattern overlay (`background.svg`)
+- Frosted glass effect on the login card (backdrop-filter blur)
+- Warm amber/gold accent colors (#d79a52, #ffbf7a) matching The Alley brand
+
+## generate_icons.py
+
+A Python script (requires Pillow) that generates all icon assets for The Alley
+branding. Each icon features a dark rounded-rect background (#0b1118) with a
+centered amber/gold serif "A" (#d79a52).
+
+Run it with:
+
+```bash
+pip3 install Pillow
+python3 branding/generate_icons.py
+```
+
+It produces every icon file listed in the table above, outputting them directly
+into the `branding/` directory ready for the Docker build.
 
 ## Recommended minimum
 
