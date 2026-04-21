@@ -12,6 +12,7 @@
 #   TEAM_NAME=relay
 #   TEAM_DISPLAY="Relay"
 #   MM_URL=http://localhost:8065
+#   BUILD_FROM_SOURCE=1  — build from local ../mattermost source tree
 
 set -euo pipefail
 
@@ -22,7 +23,11 @@ TEAM_NAME=${TEAM_NAME:-relay}
 TEAM_DISPLAY=${TEAM_DISPLAY:-Relay}
 MM_URL=${MM_URL:-http://localhost:8065}
 
-COMPOSE_FILE="docker-compose.local.yml"
+BUILD_FROM_SOURCE=${BUILD_FROM_SOURCE:-0}
+COMPOSE_FILES=(-f docker-compose.local.yml)
+if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
+  COMPOSE_FILES+=(-f docker-compose.local-source.yml)
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -46,9 +51,12 @@ for bin in curl jq docker; do
   command -v "$bin" >/dev/null 2>&1 || die "missing required binary: $bin"
 done
 docker compose version >/dev/null 2>&1 || die "docker compose v2 not available"
-[[ -f "$COMPOSE_FILE" ]] || die "$COMPOSE_FILE not found"
+for cf in "${COMPOSE_FILES[@]}"; do
+  [[ "$cf" == "-f" ]] && continue
+  [[ -f "$cf" ]] || die "$cf not found"
+done
 
-compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+compose() { docker compose "${COMPOSE_FILES[@]}" "$@"; }
 
 if [[ "$RESET" -eq 1 ]]; then
   log "Resetting: tearing down containers and wiping *-local-* volumes"
@@ -168,7 +176,7 @@ Local setup complete.
 Open $MM_URL, log in, and you're done.
 
 Tail logs:
-  docker compose -f $COMPOSE_FILE logs -f
+  docker compose ${COMPOSE_FILES[*]} logs -f
 
 Reset everything:
   $0 --reset

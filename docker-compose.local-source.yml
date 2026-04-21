@@ -1,0 +1,18 @@
+# Compose override: build Mattermost from local source instead of upstream image.
+#
+# Usage:
+#   BUILD_FROM_SOURCE=1 ./scripts/setup-local.sh
+#
+# Or manually:
+#   docker compose -f docker-compose.local.yml -f docker-compose.local-source.yml up -d --build
+#
+# Requires the mattermost source repo at ../mattermost (sibling directory).
+
+services:
+  mattermost:
+    build:
+      context: ..
+      dockerfile: mattermost-relay/Dockerfile.local-source
+      args:
+        SITE_NAME: ${SITE_NAME:-Rally}
+    image: mattermost-relay-local-source:latest
