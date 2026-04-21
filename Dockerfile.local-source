@@ -104,17 +104,22 @@ RUN rm -rf /mattermost/templates/*.mjml /mattermost/templates/partials/ /tmp/bra
 # ---------------------------------------------------------------------------
 # Stage 4: final minimal image
 # ---------------------------------------------------------------------------
-FROM gcr.io/distroless/base-debian12
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl mime-support && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 2000 mattermost && \
+    useradd --uid 2000 --gid 2000 --comment "" --home-dir /mattermost mattermost
 
 ENV PATH="/mattermost/bin:${PATH}"
 ENV MM_INSTALL_TYPE="docker"
 
-COPY --from=assembler /etc/mime.types /etc/mime.types
-COPY --from=assembler --chown=2000:2000 /etc/ssl/certs /etc/ssl/certs
 COPY --from=assembler --chown=2000:2000 /mattermost /mattermost
 
 # PostgreSQL client SSL directory
-RUN ["mkdir", "-p", "/mattermost/.postgresql"]
+RUN mkdir -p /mattermost/.postgresql && chown mattermost:mattermost /mattermost/.postgresql
 
 USER mattermost
 

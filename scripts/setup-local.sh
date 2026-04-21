@@ -51,7 +51,8 @@ if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
   [[ -d "$MATTERMOST_SOURCE/server" && -d "$MATTERMOST_SOURCE/webapp" ]] || \
     die "MATTERMOST_SOURCE=$MATTERMOST_SOURCE not found (need server/ and webapp/ dirs)"
   # Resolve to a path relative to the compose build context (parent of project dir).
-  MATTERMOST_SOURCE=$(python3 -c "import os,sys; print(os.path.relpath(os.path.realpath(sys.argv[1]), os.path.dirname(os.getcwd())))" "$MATTERMOST_SOURCE")
+  MATTERMOST_SOURCE=$(realpath "$MATTERMOST_SOURCE")
+  MATTERMOST_SOURCE=$(realpath --relative-to="$(dirname "$PROJECT_DIR")" "$MATTERMOST_SOURCE")
   export MATTERMOST_SOURCE
   COMPOSE_FILES+=(-f docker-compose.local-source.yml)
 fi
