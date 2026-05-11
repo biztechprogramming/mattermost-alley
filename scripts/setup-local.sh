@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Local bootstrap: boot Postgres + Mattermost, create the sysadmin account
-# and a team via the Mattermost API, so you land on a logged-in-ready stack
-# in one command instead of clicking through the first-run wizard.
+# Local bootstrap: boot Postgres + Mattermost on :8066 (so it can coexist
+# with prod on :8065), create the sysadmin account and a team via the
+# Mattermost API, so you land on a logged-in-ready stack in one command
+# instead of clicking through the first-run wizard.
 #
 # Safe to re-run. Pass --reset to wipe volumes and start from scratch.
 #
@@ -11,22 +12,30 @@
 #   ADMIN_PASSWORD=LocalAdmin!234
 #   TEAM_NAME=relay
 #   TEAM_DISPLAY="Relay"
-#   MM_URL=http://localhost:8065
+#   MM_URL=http://${LAN_IP:-localhost}:8066
 
 set -euo pipefail
-
-ADMIN_EMAIL=${ADMIN_EMAIL:-admin@localhost}
-ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-ADMIN_PASSWORD=${ADMIN_PASSWORD:-LocalAdmin!234}
-TEAM_NAME=${TEAM_NAME:-relay}
-TEAM_DISPLAY=${TEAM_DISPLAY:-Relay}
-MM_URL=${MM_URL:-http://localhost:8065}
 
 COMPOSE_FILE="docker-compose.local.yml"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
+
+# If .env has LAN_IP set (for mobile-on-the-LAN testing), pick it up so
+# MM_URL and the in-container SiteURL agree. Other prod-only .env keys
+# are ignored by docker-compose.local.yml.
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a; . "$PROJECT_DIR/.env"; set +a
+fi
+
+ADMIN_EMAIL=${ADMIN_EMAIL:-admin@localhost}
+ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+ADMIN_PASSWORD=${ADMIN_PASSWORD:-LocalAdmin!234}
+TEAM_NAME=${TEAM_NAME:-relay}
+TEAM_DISPLAY=${TEAM_DISPLAY:-Relay}
+MM_URL=${MM_URL:-http://${LAN_IP:-localhost}:8066}
 
 log()  { printf "==> %s\n" "$*"; }
 ok()   { printf " ok  %s\n" "$*"; }
@@ -37,7 +46,7 @@ RESET=0
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET=1 ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $arg (try --help)" ;;
   esac
 done
@@ -55,7 +64,21 @@ if [[ "$RESET" -eq 1 ]]; then
   compose down -v
 fi
 
-log "Building branded image + starting postgres + mattermost"
+# Detect non-project containers holding port 8066 — e.g. a stray dev
+# container from another project, or someone bound prod here. Our own dev
+# compose will be replaced cleanly by `up -d`, so we filter it out.
+project_name=$(basename "$PROJECT_DIR")
+holders=$(docker ps --filter "publish=8066" --format '{{.Names}}' 2>/dev/null || true)
+if [[ -n "$holders" ]]; then
+  external=$(echo "$holders" | grep -v "^${project_name}[-_]" || true)
+  if [[ -n "$external" ]]; then
+    warn "Port 8066 is currently held by:"
+    echo "$external" | sed 's/^/      /' >&2
+    die "free port 8066 and re-run"
+  fi
+fi
+
+log "Building branded image + starting postgres + mattermost on :8066"
 compose up -d --build
 
 log "Waiting for Mattermost API at $MM_URL (up to 2 min)"

@@ -1,7 +1,8 @@
 # Setup Walkthrough
 
 End-to-end deployment guide for the Mattermost relay stack
-(Postgres + Mattermost + Caddy) on a Linux server you control.
+(Postgres + Mattermost + automated backups) on a Linux server you control.
+TLS termination is delegated to an upstream nginx on a separate server.
 
 See `README.md` for the project overview and architecture.
 
@@ -9,17 +10,20 @@ See `README.md` for the project overview and architecture.
 
 ## Pre-flight — what you need before starting
 
-1. **A Linux server** — cloud VPS with a public IP, or a box at home with
-   ports 80/443 forwarded through your router.
-2. **A domain** (e.g. `chat.yourdomain.com`) whose DNS you control.
-3. **Docker + Docker Compose v2.** `docker compose version` should print
-   something. If it says "not found," Phase 1 installs it.
-4. **Shell access** to the server as a user who can run `sudo` (for initial
-   Docker install + firewall changes) or who's already in the `docker` group.
+1. **A Linux server** with Docker installed. This host does NOT need to be
+   internet-reachable on 80/443; only the upstream nginx server does.
+2. **An upstream nginx server** (different host) already terminating TLS for
+   `alley.fastlanedev.com` and able to reach this host on port 8065. See the
+   "Upstream nginx" section below for the expected config.
+3. **A domain** (e.g. `alley.fastlanedev.com`) whose DNS already points at
+   the upstream nginx server.
+4. **Docker + Docker Compose v2.** `docker compose version` should print
+   something. If not, Phase 1 installs it.
+5. **An S3 bucket + IAM credentials** for backups. Reuses the existing
+   `racecamp-db-backups` bucket under a new `mattermost-alley/` prefix.
 
 Defaults assumed below: Ubuntu 22.04+, project deployed to
-`/srv/mattermost-relay`. Adjust paths if you prefer `/opt/...` or your home
-directory.
+`/srv/environments/dev/mattermost-alley`. Adjust paths to taste.
 
 ---
 
@@ -36,43 +40,50 @@ newgrp docker        # refresh group in the current shell
 docker compose version
 ```
 
-### 1b. Open ports 80 and 443
+### 1b. Make port 8065 reachable from the upstream nginx
 
-On the server itself (UFW is the Ubuntu/Debian default):
+This host needs to accept connections on `:8065` from the upstream nginx
+server only. Two common patterns:
 
-```bash
-sudo ufw allow 22/tcp        # keep SSH reachable before enabling
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-```
+- **Tailscale / private network:** set `BIND_ADDR=<this-host's-tailnet-ip>`
+  in `.env` so 8065 is only listening on the private interface. Nothing
+  else to do — public internet can't reach it.
+- **Public network with firewall ACL:** keep `BIND_ADDR=0.0.0.0` (default)
+  and restrict in UFW:
 
-- **Port 80** is required — Let's Encrypt uses HTTP-01 challenges over
-  plain HTTP to prove domain ownership.
-- **Port 443** is where all real traffic lives once TLS is issued.
+  ```bash
+  sudo ufw allow from <nginx-server-ip> to any port 8065 proto tcp
+  sudo ufw deny  8065/tcp        # deny everything else
+  ```
 
-If the server is behind a home router / NAT, also forward 80 and 443 on the
-router to this box's LAN IP. Residential ISPs occasionally block port 80
-inbound — test with `curl http://your-domain` from a mobile hotspot once DNS
-is pointed (Phase 1c) to confirm.
+Do NOT expose 8065 to the public internet without an ACL — Mattermost on
+plain HTTP behind your TLS proxy is fine, but plain HTTP on the open
+internet leaks session tokens.
 
-### 1c. Point DNS at the server
+### 1c. Confirm DNS already resolves
 
-Create an A record at your DNS provider:
-
-```
-chat.yourdomain.com.   A   <your-public-IP>
-```
-
-Verify from **a different network** (phone on mobile data works):
+DNS for `$DOMAIN` should already point at the upstream nginx server, not
+this host. Sanity check from this server:
 
 ```bash
-dig +short chat.yourdomain.com
-# should print your public IP
+dig +short alley.fastlanedev.com
+# should print the upstream nginx server's public IP
 ```
 
-Wait ~5–10 minutes for the record to propagate before proceeding. Caddy will
-fail noisily on first boot if DNS isn't resolving yet.
+If it doesn't resolve at all, fix that before continuing — `setup-prod.sh`
+bootstraps the admin user via `https://$DOMAIN`, which won't work until
+the full path (DNS → nginx → this host → mattermost) is wired up.
+
+### 1d. Create the backup host directories
+
+The `db-backup` container writes daily + weekly dumps to a host bind. The
+emailpipeline backup container runs as UID 10000, and `tiredofit/db-backup`
+does the same:
+
+```bash
+sudo mkdir -p /srv/backups/mattermost-alley/{daily,weekly,logs}
+sudo chown -R 10000:10000 /srv/backups/mattermost-alley
+```
 
 ---
 
@@ -110,72 +121,59 @@ SSH to the server afterward and `cd /srv/mattermost-relay`.
 
 ---
 
-## Phase 3 — Configure and boot (~5 min)
+## Phase 3 — Configure and boot
 
 ```bash
-cd /srv/mattermost-relay
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```
-DOMAIN=chat.yourdomain.com
-ACME_EMAIL=you@yourdomain.com
-TZ=America/New_York                # or your timezone
-POSTGRES_PASSWORD=<strong random>
-```
-
-Generate and inject a strong Postgres password in one step:
-
-```bash
-sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -base64 32)|" .env
-```
-
-### Fast path — one script does the rest
-
-```bash
+cd /srv/environments/dev/mattermost-alley
 ./scripts/setup-prod.sh
 ```
 
-That builds the branded image, boots postgres + mattermost + caddy, waits
-for Caddy to issue a Let's Encrypt cert, then creates the admin user and
-team via the Mattermost API. Auto-generates and prints an admin password
-if you don't provide `ADMIN_PASSWORD`. Safe to re-run — if the admin or
-team already exist, it logs in and moves on.
+That's the whole phase. The script:
+
+1. Prompts you for every value in `.env`. On first run it walks all of
+   them; on re-runs it asks whether to **review all** settings or only
+   prompt for the ones still **unset**.
+2. Auto-generates strong values for `POSTGRES_PASSWORD` and
+   `RESTIC_PASSWORD` if you press Enter. For `RESTIC_PASSWORD` it prints
+   the generated value once and refuses to continue until you type
+   `saved` to confirm you've stored it. **Lose this password and every
+   restic file backup is unrecoverable.**
+3. Creates `/srv/backups/mattermost-alley/{daily,weekly,logs}` and
+   chowns them to UID 10000 (will use `sudo`).
+4. Detects whether anything else is bound to port 8065 (e.g. the dev
+   compose) and offers to stop it.
+5. Initializes the restic repository in S3 (idempotent — no-op if it
+   already exists).
+6. Resolves `$DOMAIN` to confirm DNS is wired up.
+7. `docker compose up -d --build` for postgres + mattermost + the two
+   backup services.
+8. Waits for `https://$DOMAIN/api/v4/system/ping` to respond through
+   the upstream nginx (up to 2 minutes).
+9. Logs in as the admin (creating the account on first run); creates
+   the team if needed.
+10. Verifies both backup containers are in `running` state.
+11. Prints a summary with the admin password (auto-generated if not
+    provided via `ADMIN_PASSWORD=` env).
+
+Safe to re-run. If the admin or team already exist, it logs in and moves
+on. Editing `.env` by hand between runs is also fine — the script picks
+up your edits.
 
 Flags worth knowing:
 
-- `--skip-dns-check` — bypass the DNS-vs-public-IP preflight (useful
-  behind split-horizon DNS or when running from the server itself).
-- `--no-bootstrap` — boot the stack but skip admin/team creation; leaves
-  you to do it in the browser.
+- `--skip-dns-check` — bypass the DNS resolution preflight (useful with
+  Tailnet-only or split-horizon DNS).
+- `--no-bootstrap` — boot the stack but skip admin/team creation.
+- `--non-interactive` — fail instead of prompting if any required value
+  is empty (for CI / Ansible / etc).
 
-If that worked, skip to Phase 5. Everything below is the manual
-equivalent, kept for when you want to understand or debug what the script
-is doing.
-
-> Note: the stack will boot fine without the `SES_*` variables in `.env`,
-> but Mattermost will surface a "Preview Mode: Email notifications have not
+> Note: the stack will boot fine without the `SES_*` variables, but
+> Mattermost will surface a "Preview Mode: Email notifications have not
 > been configured" banner and email invites won't send. Phase 5 fixes both.
 
-### Manual equivalent
-
-```bash
-docker compose up -d --build
-docker compose logs -f caddy mattermost
-```
-
-What to look for in the logs within ~60 seconds:
-
-- Caddy: `certificate obtained successfully` for your domain
-- Mattermost: `Server is listening on :8065`
-
-If Caddy emits `could not get certificate`, stop and fix DNS / port 80
-reachability before continuing — nothing else will work until TLS is issued.
-
-Visit `https://chat.yourdomain.com` in a browser. You should see
-Mattermost's "Create Account" screen with a valid green-padlock TLS cert.
+If you get a 502 or connection refused when the script polls `$DOMAIN`,
+the upstream nginx isn't reaching this host on 8065 — see the "Upstream
+nginx" section below.
 
 ---
 
@@ -289,6 +287,40 @@ accounts until you flip it back.
 
 ---
 
+## Upstream nginx
+
+This stack does NOT terminate TLS. The upstream nginx (on a different
+server) needs to forward `https://alley.fastlanedev.com` to this host on
+port 8065 with the right headers. A working `location` block looks like:
+
+```nginx
+location / {
+    proxy_pass http://<this-host>:8065;
+    proxy_http_version 1.1;
+
+    # Critical: without these, Mattermost thinks every request is plain
+    # http on the nginx server, breaks redirects, and logs the wrong IP.
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+
+    # Mattermost uses websockets for real-time delivery.
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        "upgrade";
+
+    proxy_read_timeout                 600s;
+    proxy_send_timeout                 600s;
+    client_max_body_size               50M;     # match MM_FILESETTINGS_MAXFILESIZE
+}
+```
+
+If WebSockets aren't upgraded, the UI silently falls back to long-polling
+and feels sluggish. If `X-Forwarded-Proto` is missing, OAuth callbacks and
+"reset password" links generate `http://` URLs and break.
+
+---
+
 ## Ongoing operations
 
 ### Routine commands
@@ -317,24 +349,72 @@ restoring is much nicer with a recent dump on hand.
 
 ### Backups
 
-Two volumes to back up:
+Backups run automatically inside the compose stack — no host cron needed.
 
-| Volume | Contents | How often |
+**Postgres** (`db-backup` service, image `tiredofit/db-backup`):
+
+| Tier | Cadence | Destination | Retention |
+|---|---|---|---|
+| Hourly | every 60 min | `s3://racecamp-db-backups/mattermost-alley/database-backups/hourly` | 2 days |
+| Daily | 01:30 | host `/srv/backups/mattermost-alley/daily` | 30 days |
+| Weekly | Sun 02:30 | host `/srv/backups/mattermost-alley/weekly` | ~12 weeks |
+
+**Uploaded files** (`restic-backup` service, image `mazzolino/restic`):
+
+| Cadence | Destination | Retention |
 |---|---|---|
-| `postgres-data` | All messages, channels, users | Daily |
-| `mattermost-data` | Uploaded files / attachments | Weekly |
+| Daily 03:30 | `s3://racecamp-db-backups/mattermost-alley/files` (encrypted) | 7 daily / 4 weekly / 6 monthly |
 
-Nightly Postgres dump to a local file:
+Health-check after first boot:
 
 ```bash
-mkdir -p /srv/mattermost-relay/backups
-docker compose exec -T postgres pg_dump -U mattermost mattermost \
-  | gzip > /srv/mattermost-relay/backups/mm-$(date +%F).sql.gz
+docker compose logs -f db-backup restic-backup
+aws s3 ls s3://racecamp-db-backups/mattermost-alley/ --recursive | tail -20
 ```
 
-Wrap that in cron (e.g. `0 3 * * *`) and copy the output off-box
-(Backblaze B2 / S3 / a second server). Without off-box backups, a disk
-failure loses your whole chat history.
+#### Restoring postgres
+
+From the hourly S3 tier:
+
+```bash
+aws s3 cp s3://racecamp-db-backups/mattermost-alley/database-backups/hourly/<file>.sql.gz .
+gunzip -c <file>.sql.gz | docker compose exec -T postgres psql -U mattermost mattermost
+```
+
+From the local daily/weekly tier:
+
+```bash
+ls /srv/backups/mattermost-alley/daily/
+gunzip -c /srv/backups/mattermost-alley/daily/<file>.sql.gz \
+  | docker compose exec -T postgres psql -U mattermost mattermost
+```
+
+#### Restoring uploaded files
+
+```bash
+# List available snapshots
+docker compose run --rm -e RESTIC_PASSWORD --env-file .env restic-backup \
+  restic snapshots
+
+# Restore the latest snapshot into a scratch dir
+docker compose run --rm -v /tmp/mm-restore:/restore restic-backup \
+  restic restore latest --target /restore
+
+# Copy back into the live volume (stop mattermost first)
+docker compose stop mattermost
+docker run --rm -v mattermost-alley_mattermost-data:/dst -v /tmp/mm-restore:/src alpine \
+  sh -c "rm -rf /dst/* && cp -a /src/data/mattermost-data/. /dst/"
+docker compose start mattermost
+```
+
+#### Quarterly restore drill
+
+The backup is worthless if you've never restored from it. Once a quarter:
+
+1. Pick a recent hourly S3 dump and restore it into a scratch postgres
+   container — confirm row counts look reasonable.
+2. Run `restic check` against the file-uploads repo to verify integrity.
+3. Note the date in a calendar / ops log.
 
 ### Monitoring (lightweight)
 

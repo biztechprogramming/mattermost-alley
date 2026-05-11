@@ -1,3 +1,16 @@
+# Production compose for mattermost-alley.
+#
+# TLS is terminated by an upstream nginx on a different server, which
+# reverse-proxies https://alley.fastlanedev.com to this host on port 8065.
+# This stack therefore does NOT run Caddy and does NOT terminate TLS itself.
+#
+# The dev compose (docker-compose.local.yml) uses 8066 + *-local-* volumes
+# so the two can coexist on this host without colliding.
+#
+# Backups: postgres dumps go to S3 (hourly) and a host bind (daily + weekly)
+# via tiredofit/db-backup. The mattermost-data volume (uploaded files) is
+# snapshotted to S3 daily via restic. See SETUP.md "Backups" for restore.
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -27,14 +40,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      # Bound to all interfaces so the upstream nginx on a different host
+      # can reach 8065. Restrict at the firewall (or override BIND_ADDR
+      # to a Tailscale / private IP) if 8065 is on a public network.
+      - "${BIND_ADDR:-0.0.0.0}:8065:8065"
     environment:
       TZ: ${TZ:-UTC}
       MM_SQLSETTINGS_DRIVERNAME: postgres
       MM_SQLSETTINGS_DATASOURCE: postgres://mattermost:${POSTGRES_PASSWORD}@postgres:5432/mattermost?sslmode=disable&connect_timeout=10
+      # Upstream nginx terminates TLS and forwards here, so SiteURL is https
+      # even though this container speaks plain http on 8065.
       MM_SERVICESETTINGS_SITEURL: https://${DOMAIN}
+      # Trust the X-Forwarded-* headers from the upstream nginx so Mattermost
+      # logs the real client IP and treats requests as https for redirects.
+      MM_SERVICESETTINGS_TRUSTEDPROXYIPHEADER: X-Forwarded-For
       MM_TEAMSETTINGS_SITENAME: ${SITE_NAME:-Mattermost}
       MM_FILESETTINGS_MAXFILESIZE: "52428800"
-      # AWS SES SMTP — see SETUP.md Phase 5. Credentials come from .env.
       MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS: "true"
       MM_EMAILSETTINGS_REQUIREEMAILVERIFICATION: "true"
       MM_EMAILSETTINGS_FEEDBACKNAME: ${SITE_NAME:-Mattermost}
@@ -60,23 +82,102 @@ services:
       timeout: 10s
       retries: 3
 
-  caddy:
-    image: caddy:2-alpine
+  # Postgres backups, three-tier (mirrors emailpipeline-db-backup).
+  # DB01: hourly  → S3 (racecamp-db-backups/mattermost-alley/database-backups/hourly), 2-day retention
+  # DB02: daily   → /srv/backups/mattermost-alley/daily,  30-day retention
+  # DB03: weekly  → /srv/backups/mattermost-alley/weekly, ~12-week retention
+  db-backup:
+    image: tiredofit/db-backup:latest
+    container_name: mattermost-alley-db-backup
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
     depends_on:
-      - mattermost
+      postgres:
+        condition: service_healthy
     networks:
       - internal
+    volumes:
+      - /srv/backups/mattermost-alley:/backup
+      - /srv/backups/mattermost-alley/logs:/logs
+    environment:
+      TIMEZONE: ${TZ:-UTC}
+      CONTAINER_ENABLE_MONITORING: "FALSE"
+      CONTAINER_ENABLE_LOGSHIPPING: "FALSE"
+      DEFAULT_COMPRESSION: GZ
+      DEFAULT_CHECKSUM: SHA1
+      DEFAULT_BACKUP_LOCATION: S3
+      DEFAULT_CLEANUP_TIME: 10080
+      BACKUP_JOB_CONCURRENCY: 1
+
+      # --- DB01: hourly to S3 ---
+      DB01_TYPE: pgsql
+      DB01_HOST: postgres
+      DB01_PORT: 5432
+      DB01_NAME: mattermost
+      DB01_USER: mattermost
+      DB01_PASS: ${POSTGRES_PASSWORD}
+      DB01_BACKUP_INTERVAL: 60          # minutes
+      DB01_BACKUP_BEGIN: "+1"            # start 1 minute after boot
+      DB01_CLEANUP_TIME: 2880            # keep 2 days
+      DB01_BACKUP_LOCATION: S3
+      DB01_S3_BUCKET: ${S3_BACKUP_BUCKET}
+      DB01_S3_REGION: ${S3_BACKUP_REGION:-us-east-1}
+      DB01_S3_PATH: mattermost-alley/database-backups/hourly
+      DB01_S3_KEY_ID: ${S3_BACKUP_KEY_ID}
+      DB01_S3_KEY_SECRET: ${S3_BACKUP_KEY_SECRET}
+
+      # --- DB02: daily to local filesystem ---
+      DB02_TYPE: pgsql
+      DB02_HOST: postgres
+      DB02_PORT: 5432
+      DB02_NAME: mattermost
+      DB02_USER: mattermost
+      DB02_PASS: ${POSTGRES_PASSWORD}
+      DB02_BACKUP_INTERVAL: 1440         # 24 hours
+      DB02_BACKUP_BEGIN: "0130"          # 01:30
+      DB02_CLEANUP_TIME: 43200           # 30 days
+      DB02_BACKUP_LOCATION: FILESYSTEM
+      DB02_FILESYSTEM_PATH: /backup/daily
+
+      # --- DB03: weekly to local filesystem ---
+      DB03_TYPE: pgsql
+      DB03_HOST: postgres
+      DB03_PORT: 5432
+      DB03_NAME: mattermost
+      DB03_USER: mattermost
+      DB03_PASS: ${POSTGRES_PASSWORD}
+      DB03_BACKUP_INTERVAL: 10080        # 7 days
+      DB03_BACKUP_BEGIN: "0230"          # 02:30 (Sunday by default)
+      DB03_CLEANUP_TIME: 120960          # ~12 weeks
+      DB03_BACKUP_LOCATION: FILESYSTEM
+      DB03_FILESYSTEM_PATH: /backup/weekly
+
+  # Uploaded-files backup. mattermost-data is a file tree, not a DB, so
+  # restic (encrypted, deduplicated, point-in-time) is the right tool.
+  # First-time setup REQUIRES manual `restic init` — see SETUP.md.
+  restic-backup:
+    image: mazzolino/restic:latest
+    container_name: mattermost-alley-restic
+    restart: unless-stopped
+    depends_on:
+      - mattermost
+    volumes:
+      - mattermost-data:/data/mattermost-data:ro
+    environment:
+      TZ: ${TZ:-UTC}
+      RESTIC_REPOSITORY: s3:s3.${S3_BACKUP_REGION:-us-east-1}.amazonaws.com/${S3_BACKUP_BUCKET}/mattermost-alley/files
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${S3_BACKUP_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${S3_BACKUP_KEY_SECRET}
+      BACKUP_CRON: "0 30 3 * * *"        # daily 03:30
+      RESTIC_BACKUP_SOURCES: /data/mattermost-data
+      RESTIC_BACKUP_TAGS: mattermost-data
+      RESTIC_FORGET_ARGS: >-
+        --keep-daily 7
+        --keep-weekly 4
+        --keep-monthly 6
+        --prune
+      RESTIC_INIT_ARGS: ""               # set --repository-version=2 on a clean repo if desired
+      RUN_ON_STARTUP: "false"            # don't fire a backup the moment the container boots
 
 volumes:
   postgres-data:
@@ -85,8 +186,6 @@ volumes:
   mattermost-logs:
   mattermost-plugins:
   mattermost-client-plugins:
-  caddy-data:
-  caddy-config:
 
 networks:
   internal:
