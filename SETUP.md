@@ -128,7 +128,16 @@ cd /srv/environments/dev/mattermost-alley
 ./scripts/setup-prod.sh
 ```
 
-That's the whole phase. The script:
+That's the whole phase. If you've already set up this stack on another
+machine and pushed `.env` to S3, you can pull it first instead of
+re-walking every prompt:
+
+```bash
+./scripts/secrets-pull.sh   # downloads .env from S3 (see "Secrets sync" below)
+./scripts/setup-prod.sh --non-interactive
+```
+
+The script:
 
 1. Prompts you for every value in `.env`. On first run it walks all of
    them; on re-runs it asks whether to **review all** settings or only
@@ -318,6 +327,88 @@ location / {
 If WebSockets aren't upgraded, the UI silently falls back to long-polling
 and feels sluggish. If `X-Forwarded-Proto` is missing, OAuth callbacks and
 "reset password" links generate `http://` URLs and break.
+
+---
+
+## Secrets sync (S3)
+
+`.env` contains every secret the stack needs (postgres password, SES creds,
+S3 keys, restic password, admin password). To avoid retyping it on each
+machine you operate this from, the repo includes three scripts that
+sync `.env` to S3 with full version history and a keys-only audit log.
+
+| Script | Purpose |
+|---|---|
+| `./scripts/secrets-push.sh` | Diff local `.env` vs S3, append audit entry, upload |
+| `./scripts/secrets-pull.sh` | Download latest (or `--version-id <id>`) to local |
+| `./scripts/secrets-diff.sh` | Preview what `push` would do, no upload |
+
+**Storage layout** (under your existing `racecamp-db-backups` bucket):
+
+```
+s3://racecamp-db-backups/mattermost-alley/secrets/
+├── .env                  # latest; S3 versioning keeps every previous push
+└── secrets-audit.log     # append-only "who changed which keys when"
+```
+
+**Security model:**
+
+- Encryption at rest via the bucket's default SSE-KMS (free, AWS-managed key).
+- Bucket versioning is enabled automatically by `secrets-push.sh` on first run.
+- The audit log records **only the keys that changed** — never values.
+  Previous values are recoverable via S3 versioning, not via the log.
+  This keeps the log safe to share / non-honeypot if someone gains read access.
+- Diff output in the terminal shows fingerprinted values (`a3f9…c8d2`).
+  Pass `--show-values` for full reveal when you really need it.
+
+**First time, on the machine where `.env` is correct:**
+
+```bash
+./scripts/secrets-push.sh --first-push
+```
+
+Before that works, **enable bucket versioning once** (the backup IAM user
+intentionally doesn't have permission to flip this — it's an admin action):
+
+> AWS console → S3 → `racecamp-db-backups` → Properties tab →
+> Bucket Versioning → Edit → Enable → Save.
+
+Five clicks, one time. If you skip this, pushes still work but you lose
+the version history that makes recovery possible.
+
+**On a fresh machine after `git clone`:**
+
+```bash
+./scripts/secrets-pull.sh
+./scripts/setup-prod.sh --non-interactive
+```
+
+**After editing `.env`:**
+
+```bash
+./scripts/secrets-diff.sh           # preview
+./scripts/secrets-push.sh           # confirm + upload
+```
+
+**Recover a previous version** (e.g. you pushed a bad edit):
+
+```bash
+aws s3api list-object-versions \
+  --bucket racecamp-db-backups \
+  --prefix mattermost-alley/secrets/.env \
+  --query 'Versions[].[VersionId,LastModified]' --output table
+
+./scripts/secrets-pull.sh --version-id <chosen-VersionId>
+```
+
+**Read the audit log:**
+
+```bash
+aws s3 cp s3://racecamp-db-backups/mattermost-alley/secrets/secrets-audit.log -
+```
+
+**Cost:** effectively $0/month at this usage. ~1 KB per version + a handful
+of KMS API calls per push.
 
 ---
 

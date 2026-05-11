@@ -29,7 +29,10 @@ Postgres and the two backup sidecars are on an internal Docker network.
 ├── scripts/
 │   ├── setup-prod.sh          # One-shot: prompts for .env, boots stack, inits restic, bootstraps admin
 │   ├── setup-local.sh         # Dev equivalent (no prompts, hardcoded creds)
-│   └── seed-channels.sh       # Idempotent channel seeding
+│   ├── seed-channels.sh       # Idempotent channel seeding
+│   ├── secrets-push.sh        # Upload .env to S3 with keys-only audit log
+│   ├── secrets-pull.sh        # Download .env from S3 (latest or specific version)
+│   └── secrets-diff.sh        # Preview what push would do
 ├── SETUP.md                   # End-to-end production deployment walkthrough
 └── LOCAL_DEV.md               # Rehearse the setup on your workstation
 ```
@@ -100,6 +103,22 @@ Mattermost releases roughly monthly. The hourly postgres backup gives you
 a free rollback point if an upgrade misbehaves — verify in
 `s3://racecamp-db-backups/mattermost-alley/database-backups/hourly/`
 before pulling.
+
+## Secrets sync
+
+`.env` contains every secret the stack needs. To avoid losing it (or
+retyping it on a new machine), three scripts push/pull/diff it to S3:
+
+```bash
+./scripts/secrets-push.sh        # diff + audit log entry + upload
+./scripts/secrets-pull.sh        # download latest to local .env
+./scripts/secrets-diff.sh        # preview what push would do
+```
+
+Stored at `s3://racecamp-db-backups/mattermost-alley/secrets/.env` with
+S3 versioning (full history) + a keys-only audit log. Old values are
+recoverable via `aws s3api list-object-versions`. Full walkthrough in
+SETUP.md → "Secrets sync".
 
 ## Backups
 
