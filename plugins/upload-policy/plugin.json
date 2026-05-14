@@ -1,0 +1,55 @@
+{
+    "id": "com.biztechprogramming.upload-policy",
+    "name": "Upload Policy",
+    "description": "Resizes oversized image uploads server-side and rejects videos / PDFs. Applies uniformly to web, mobile, and desktop clients.",
+    "homepage_url": "https://github.com/biztechprogramming/mattermost-alley",
+    "support_url": "https://github.com/biztechprogramming/mattermost-alley/issues",
+    "version": "0.2.0",
+    "min_server_version": "9.5.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64"
+        }
+    },
+    "settings_schema": {
+        "header": "Resizes large image uploads and rejects video / PDF uploads. Runs inside the server upload pipeline, so every client (web, mobile, desktop) is covered.",
+        "footer": "PNG and GIF uploads only get converted to JPEG when their longest edge exceeds MaxDimension; small PNG/GIF files pass through untouched so transparency and animation are preserved. Videos and PDFs are always rejected when RejectVideosAndPDFs is on, with the configured message shown to the uploader.",
+        "settings": [
+            {
+                "key": "Enabled",
+                "display_name": "Enabled",
+                "type": "bool",
+                "help_text": "Master switch for the entire plugin.",
+                "default": true
+            },
+            {
+                "key": "MaxDimension",
+                "display_name": "Max image dimension (pixels, long edge)",
+                "type": "number",
+                "help_text": "Images whose longest edge exceeds this will be resized down. JPEGs get re-encoded; PNGs and GIFs are converted to JPEG only when they exceed this size.",
+                "default": 1280
+            },
+            {
+                "key": "JpegQuality",
+                "display_name": "JPEG quality (1-100)",
+                "type": "number",
+                "help_text": "Output JPEG quality. 80 is a good chat-app default.",
+                "default": 80
+            },
+            {
+                "key": "RejectVideosAndPDFs",
+                "display_name": "Reject videos and PDFs",
+                "type": "bool",
+                "help_text": "Block uploads detected as video/* or application/pdf.",
+                "default": true
+            },
+            {
+                "key": "RejectMessage",
+                "display_name": "Reject message",
+                "type": "text",
+                "help_text": "Shown to the uploader when a video or PDF is blocked.",
+                "default": "This file type isn't allowed in this chat. Please convert it to an image, or share a link instead."
+            }
+        ]
+    }
+}

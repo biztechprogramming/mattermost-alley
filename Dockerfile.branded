@@ -49,7 +49,26 @@ RUN set -eu; \
       if [ -f "$f" ]; then cp "$f" "/overlay/mattermost/client/$f"; fi; \
     done
 
+# Plugin builder: compile plugins/upload-policy/ into a Mattermost plugin
+# tarball. The plugin source lives in this repo so each alley commit pins
+# the exact plugin version baked into the image.
+#
+# We can't drop the tarball into /mattermost/prepackaged_plugins/ because
+# Mattermost hardcodes a GPG signature requirement for prepackaged plugins
+# (channels/app/plugin.go: "Always require signature for prepackaged
+# plugins"), and setting up trusted-key signing just to ship our own
+# in-repo plugin would be overkill. Instead we land the tarball at a
+# stable path inside the image and install it via mmctl after the
+# container is healthy. See scripts/install-upload-policy.sh.
+FROM golang:1.25-alpine AS plugin-builder
+RUN apk add --no-cache make tar
+WORKDIR /src
+COPY plugins/upload-policy/ /src/
+RUN make dist && cp com.biztechprogramming.upload-policy-*.tar.gz /upload-policy.tar.gz
+
 # Final stage: layer the overlay on top of the stock Mattermost image.
 # Only COPY is used here because the base is distroless.
 FROM source
 COPY --from=builder /overlay /
+COPY --from=plugin-builder /upload-policy.tar.gz \
+     /mattermost/baked-plugins/upload-policy.tar.gz

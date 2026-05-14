@@ -1,0 +1,4 @@
+server/dist/
+dist-bundle/
+*.tar.gz
+.go-cache/
