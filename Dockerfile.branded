@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Branded Mattermost image.
 #
 # The upstream mattermost/mattermost-team-edition image is distroless — no
@@ -15,7 +17,7 @@
 # Translation files + the MM_TEAMSETTINGS_SITENAME config var cover nearly
 # every user-visible surface.
 
-ARG MATTERMOST_VERSION=latest
+ARG MATTERMOST_VERSION=11.6.1
 
 # Pin the source image under a named stage so the builder can COPY --from
 # it without re-specifying the tag.
@@ -66,9 +68,34 @@ WORKDIR /src
 COPY plugins/upload-policy/ /src/
 RUN make dist && cp com.biztechprogramming.upload-policy-*.tar.gz /upload-policy.tar.gz
 
+# Healthcheck binary: the final image is distroless (no curl, wget, or shell),
+# so the docker-compose healthcheck can't run a curl probe. Instead we compile
+# a tiny static Go binary that GETs /api/v4/system/ping and exits 0 on 200, 1
+# otherwise. ~2 MB, no runtime deps, invoked via docker healthcheck's CMD form.
+FROM golang:1.25-alpine AS healthcheck-builder
+WORKDIR /src
+COPY <<'EOF' main.go
+package main
+
+import (
+	"net/http"
+	"os"
+)
+
+func main() {
+	resp, err := http.Get("http://localhost:8065/api/v4/system/ping")
+	if err != nil || resp.StatusCode != 200 {
+		os.Exit(1)
+	}
+}
+EOF
+RUN go mod init healthcheck && \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /healthcheck main.go
+
 # Final stage: layer the overlay on top of the stock Mattermost image.
 # Only COPY is used here because the base is distroless.
 FROM source
 COPY --from=builder /overlay /
 COPY --from=plugin-builder /upload-policy.tar.gz \
      /mattermost/baked-plugins/upload-policy.tar.gz
+COPY --from=healthcheck-builder /healthcheck /healthcheck
